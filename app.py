@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import gspread
-from google.oauth2.service_account import Credentials # Librería moderna actualizada
+from google.oauth2.service_account import Credentials # <--- CAMBIO IMPORTANTE: Librería moderna
 import uuid
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
@@ -17,18 +17,20 @@ def check_password():
         if st.session_state["username"] in st.secrets["passwords"] and \
            st.session_state["password"] == st.secrets["passwords"][st.session_state["username"]]:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # No guardar contraseña
+            # Borramos la contraseña de la memoria por seguridad
+            del st.session_state["password"]  
         else:
             st.session_state["password_correct"] = False
 
+    # Si ya se validó antes, retornamos True inmediatamente
     if st.session_state.get("password_correct", False):
         return True
 
-    # Interfaz de Login
+    # Si no, mostramos la pantalla de login
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         st.title("🔒 Acceso Restringido")
-        st.markdown("Inicia sesión para acceder al tablero.")
+        st.markdown("Por favor, inicia sesión para gestionar el proyecto.")
         st.text_input("Usuario", key="username")
         st.text_input("Contraseña", type="password", on_change=password_entered, key="password")
 
@@ -38,9 +40,10 @@ def check_password():
     return False
 
 # --- 3. APLICACIÓN PRINCIPAL (Protegida) ---
+# Todo el código de la app debe estar DENTRO de este if
 if check_password():
 
-    # --- CONEXIÓN A GOOGLE SHEETS (CORREGIDA) ---
+    # --- CONEXIÓN A GOOGLE SHEETS (MODERNA) ---
     @st.cache_resource
     def conectar_google_sheets():
         # Definir el alcance (Scope)
@@ -59,7 +62,7 @@ if check_password():
     def cargar_datos():
         try:
             client = conectar_google_sheets()
-            # REVISA QUE TU HOJA SE LLAME ASÍ EN GOOGLE
+            # ⚠️ ASEGÚRATE QUE TU HOJA SE LLAME "GestionProyecto"
             sheet = client.open("ProjectFramework").sheet1 
             data = sheet.get_all_records()
             
@@ -78,13 +81,13 @@ if check_password():
             
             cell = sheet.find(str(id_tarea))
             
-            # Mapa de columnas: Ajusta si cambias el orden en tu Excel
-            # id=1, titulo=2, responsable=3, estado=4, esfuerzo=5
+            # Mapa de columnas: Ajusta estos números si cambias el orden en tu Excel
+            # Columna 1=ID, 2=Titulo, 3=Responsable, 4=Estado, 5=Esfuerzo
             col_map = {"titulo": 2, "responsable": 3, "estado": 4, "esfuerzo": 5}
             
             if cell:
                 sheet.update_cell(cell.row, col_map[nueva_columna], nuevo_valor)
-                st.cache_data.clear() # Limpiar caché para ver cambios
+                st.cache_data.clear() # Limpiar caché para refrescar
         except Exception as e:
             st.error(f"Error al actualizar: {e}")
 
@@ -93,7 +96,7 @@ if check_password():
             client = conectar_google_sheets()
             sheet = client.open("GestionProyecto").sheet1
             nuevo_id = str(uuid.uuid4())[:8]
-            # Orden exacto de columnas: ID, Titulo, Resp, Estado, Esfuerzo
+            # Orden exacto de columnas para guardar
             fila = [nuevo_id, titulo, responsable, "Por Hacer", esfuerzo] 
             sheet.append_row(fila)
             st.cache_data.clear()
@@ -107,6 +110,7 @@ if check_password():
 
     # Barra Lateral
     with st.sidebar:
+        # Este saludo daba error antes porque estaba fuera del 'if'
         st.write(f"Hola, *{st.session_state['username']}* 👋")
         st.divider()
         st.header("⚡ Nueva Tarea")
@@ -124,13 +128,13 @@ if check_password():
             del st.session_state["password_correct"]
             st.rerun()
 
-    # Título
+    # Título Principal
     st.title("🚀 Gestión de Proyectos")
 
     # Pestañas
     tab1, tab2 = st.tabs(["📋 Tablero Kanban", "📊 Dashboard de Impacto"])
 
-    # --- PESTAÑA 1: KANBAN ---
+    # --- VISTA 1: KANBAN ---
     with tab1:
         st.subheader("Flujo de Trabajo")
         
@@ -175,7 +179,7 @@ if check_password():
         else:
             st.info("No hay tareas. ¡Crea la primera en la barra lateral!")
 
-    # --- PESTAÑA 2: DASHBOARD ---
+    # --- VISTA 2: DASHBOARD ---
     with tab2:
         if not df.empty:
             st.subheader("Métricas de Rendimiento")
