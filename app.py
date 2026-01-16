@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials # Librería moderna actualizada
 import uuid
 
-# --- 1. CONFIGURACIÓN DE PÁGINA (Debe ser lo primero) ---
+# --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Project Tracker Pro", layout="wide", page_icon="🚀")
 
 # --- 2. SISTEMA DE LOGIN ---
@@ -17,12 +17,10 @@ def check_password():
         if st.session_state["username"] in st.secrets["passwords"] and \
            st.session_state["password"] == st.secrets["passwords"][st.session_state["username"]]:
             st.session_state["password_correct"] = True
-            # No guardamos la contraseña en session_state por seguridad
-            del st.session_state["password"]  
+            del st.session_state["password"]  # No guardar contraseña
         else:
             st.session_state["password_correct"] = False
 
-    # Si ya validó correctamente, retornar True
     if st.session_state.get("password_correct", False):
         return True
 
@@ -30,7 +28,7 @@ def check_password():
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         st.title("🔒 Acceso Restringido")
-        st.markdown("Por favor, inicia sesión para acceder al tablero de gestión.")
+        st.markdown("Inicia sesión para acceder al tablero.")
         st.text_input("Usuario", key="username")
         st.text_input("Contraseña", type="password", on_change=password_entered, key="password")
 
@@ -42,15 +40,17 @@ def check_password():
 # --- 3. APLICACIÓN PRINCIPAL (Protegida) ---
 if check_password():
 
-    # --- CONEXIÓN A GOOGLE SHEETS ---
+    # --- CONEXIÓN A GOOGLE SHEETS (CORREGIDA) ---
     @st.cache_resource
     def conectar_google_sheets():
-        # Definir el alcance de la API
+        # Definir el alcance (Scope)
         scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
         
-        # Cargar credenciales desde st.secrets
+        # Cargar credenciales desde secrets
         creds_dict = dict(st.secrets["gcp_service_account"])
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        
+        # Crear credenciales con la librería moderna (google-auth)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         
         # Autorizar cliente
         client = gspread.authorize(creds)
@@ -59,8 +59,8 @@ if check_password():
     def cargar_datos():
         try:
             client = conectar_google_sheets()
-            # NOMBRE DE TU HOJA EN GOOGLE (Asegúrate que coincida)
-            sheet = client.open("GestionProyecto").sheet1 
+            # REVISA QUE TU HOJA SE LLAME ASÍ EN GOOGLE
+            sheet = client.open("ProjectFramework").sheet1 
             data = sheet.get_all_records()
             
             if not data:
@@ -72,34 +72,40 @@ if check_password():
             return pd.DataFrame()
 
     def actualizar_tarea(id_tarea, nueva_columna, nuevo_valor):
-        client = conectar_google_sheets()
-        sheet = client.open("GestionProyecto").sheet1
-        
-        # Buscar la celda por ID
-        cell = sheet.find(str(id_tarea))
-        
-        # Mapeo de columnas (Ajusta los índices si cambias el orden en Sheets)
-        # id=1, titulo=2, responsable=3, estado=4, esfuerzo=5
-        col_map = {"titulo": 2, "responsable": 3, "estado": 4, "esfuerzo": 5}
-        
-        if cell:
-            sheet.update_cell(cell.row, col_map[nueva_columna], nuevo_valor)
-            st.cache_data.clear() # Limpiar caché
+        try:
+            client = conectar_google_sheets()
+            sheet = client.open("GestionProyecto").sheet1
+            
+            cell = sheet.find(str(id_tarea))
+            
+            # Mapa de columnas: Ajusta si cambias el orden en tu Excel
+            # id=1, titulo=2, responsable=3, estado=4, esfuerzo=5
+            col_map = {"titulo": 2, "responsable": 3, "estado": 4, "esfuerzo": 5}
+            
+            if cell:
+                sheet.update_cell(cell.row, col_map[nueva_columna], nuevo_valor)
+                st.cache_data.clear() # Limpiar caché para ver cambios
+        except Exception as e:
+            st.error(f"Error al actualizar: {e}")
 
     def crear_tarea(titulo, responsable, esfuerzo):
-        client = conectar_google_sheets()
-        sheet = client.open("GestionProyecto").sheet1
-        nuevo_id = str(uuid.uuid4())[:8]
-        fila = [nuevo_id, titulo, responsable, "Por Hacer", esfuerzo] 
-        sheet.append_row(fila)
-        st.cache_data.clear()
+        try:
+            client = conectar_google_sheets()
+            sheet = client.open("GestionProyecto").sheet1
+            nuevo_id = str(uuid.uuid4())[:8]
+            # Orden exacto de columnas: ID, Titulo, Resp, Estado, Esfuerzo
+            fila = [nuevo_id, titulo, responsable, "Por Hacer", esfuerzo] 
+            sheet.append_row(fila)
+            st.cache_data.clear()
+        except Exception as e:
+            st.error(f"Error al crear tarea: {e}")
 
-    # --- INTERFAZ DE USUARIO ---
+    # --- INTERFAZ VISUAL ---
 
     # Cargar datos
     df = cargar_datos()
 
-    # Barra lateral (Sidebar)
+    # Barra Lateral
     with st.sidebar:
         st.write(f"Hola, *{st.session_state['username']}* 👋")
         st.divider()
@@ -118,37 +124,35 @@ if check_password():
             del st.session_state["password_correct"]
             st.rerun()
 
-    # Título Principal
+    # Título
     st.title("🚀 Gestión de Proyectos")
 
-    # Tabs de Navegación
+    # Pestañas
     tab1, tab2 = st.tabs(["📋 Tablero Kanban", "📊 Dashboard de Impacto"])
 
-    # --- VISTA 1: KANBAN ---
+    # --- PESTAÑA 1: KANBAN ---
     with tab1:
         st.subheader("Flujo de Trabajo")
         
         col1, col2, col3 = st.columns(3)
         columnas_kanban = {
-            "Por Hacer": (col1, "🔴", "#ffe6e6"),
-            "En Progreso": (col2, "🟡", "#fff9c4"),
-            "Hecho": (col3, "🟢", "#e8f5e9")
+            "Por Hacer": (col1, "🔴"),
+            "En Progreso": (col2, "🟡"),
+            "Hecho": (col3, "🟢")
         }
 
         if not df.empty:
-            for estado, (col_obj, icono, color_bg) in columnas_kanban.items():
+            for estado, (col_obj, icono) in columnas_kanban.items():
                 with col_obj:
                     st.markdown(f"<h3 style='text-align: center;'>{icono} {estado}</h3>", unsafe_allow_html=True)
                     st.markdown("---")
                     tareas_filtradas = df[df['estado'] == estado]
                     
                     for i, row in tareas_filtradas.iterrows():
-                        # Tarjeta visual
                         with st.container(border=True):
                             st.markdown(f"**{row['titulo']}**")
                             st.caption(f"👤 {row['responsable']} | ⚙️ {row['esfuerzo']} pts")
                             
-                            # Botones de Acción
                             c_izq, c_der = st.columns([1, 1])
                             
                             if estado == "Por Hacer":
@@ -169,14 +173,13 @@ if check_password():
                                     actualizar_tarea(row['id'], "estado", "En Progreso")
                                     st.rerun()
         else:
-            st.info("No hay tareas aún. Usa la barra lateral para crear la primera.")
+            st.info("No hay tareas. ¡Crea la primera en la barra lateral!")
 
-    # --- VISTA 2: DASHBOARD ---
+    # --- PESTAÑA 2: DASHBOARD ---
     with tab2:
         if not df.empty:
             st.subheader("Métricas de Rendimiento")
             
-            # KPIs Principales
             total_esfuerzo = df['esfuerzo'].sum()
             hecho_esfuerzo = df[df['estado'] == 'Hecho']['esfuerzo'].sum()
             avance = (hecho_esfuerzo / total_esfuerzo * 100) if total_esfuerzo > 0 else 0
@@ -190,7 +193,6 @@ if check_password():
             
             st.divider()
             
-            # Gráficos de Impacto
             g1, g2 = st.columns(2)
             
             with g1:
